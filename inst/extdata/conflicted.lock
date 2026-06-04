@@ -1,0 +1,98 @@
+{
+  "R": {
+    "Version": "4.3.2",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://cran.rstudio.com"
+      }
+    ]
+  },
+  "Packages": {
+    "glue": {
+      "Package": "glue",
+      "Version": "1.7.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "e0b3a53876554bd45879e596cdb10a52"
+    },
+    "rlang": {
+      "Package": "rlang",
+      "Version": "1.0.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "42548638fae05fd9a9b5f3f437fbbbe2"
+    },
+    "cli": {
+      "Package": "cli",
+      "Version": "3.6.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "1216ac65ac55ec0058a6f75d7ca0fd52"
+    },
+    "alpha": {
+      "Package": "alpha",
+      "Version": "1.0.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "glue",
+        "zeta"
+      ],
+      "Hash": "aa00bb11cc22dd33ee44ff5566778899"
+    },
+    "ouroboros": {
+      "Package": "ouroboros",
+      "Version": "0.2.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "boros"
+      ],
+      "Hash": "11aa22bb33cc44dd55ee66ff77889900"
+    },
+    "boros": {
+      "Package": "boros",
+      "Version": "0.3.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "ouroboros"
+      ],
+      "Hash": "99aa88bb77cc66dd55ee44ff33221100"
+    },
+    "needsNewRlang": {
+      "Package": "needsNewRlang",
+      "Version": "2.1.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "rlang (>= 1.1.0)"
+      ],
+      "Hash": "abc1230000000000000000000000def0"
+    },
+    "needsOldRlang": {
+      "Package": "needsOldRlang",
+      "Version": "0.9.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "rlang (<= 0.4.12)"
+      ],
+      "Hash": "def4560000000000000000000000abc1"
+    },
+    "wantsRecentCli": {
+      "Package": "wantsRecentCli",
+      "Version": "1.4.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "cli (>= 99.0.0)"
+      ],
+      "Hash": "7890ab0000000000000000000000cd34"
+    }
+  }
+}

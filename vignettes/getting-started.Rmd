@@ -1,0 +1,183 @@
+---
+title: "Getting started with buildwright"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with buildwright}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+library(buildwright)
+```
+
+## The problem
+
+Platform and DevOps teams that maintain a shared R distribution rarely fail an
+install because of a typo. They fail because a few hundred packages, pinned in an
+`renv.lock` and spread across CRAN, Bioconductor and GitHub, quietly disagree:
+one package needs `rlang (>= 1.1.0)` while another caps it at `<= 0.4.12`, a
+required package was never recorded, a pair of packages depend on each other in a
+cycle, or a binary needs a system library (`libcurl`, `GDAL`, `OpenSSL`) that the
+build image does not ship. buildwright reads the lockfile *before* you build,
+models the whole graph, and tells you exactly which packages will fail and why --
+so the dry run happens in milliseconds instead of after twenty minutes of
+compilation on a fresh machine.
+
+Everything below runs against lockfiles bundled with the package, reachable
+through `bw_example()`, so no network or installed library is required.
+
+## Scan a lockfile
+
+`scan_library()` auto-detects its input -- here, an `renv.lock` path -- and
+returns a tidy `bw_library` tibble with one row per package.
+
+```{r scan}
+lib <- scan_library(bw_example("clean.lock"))
+lib
+```
+
+Each package carries a normalised `source`. The clean fixture spans three of
+them:
+
+```{r scan-source}
+table(lib$source)
+```
+
+## Build the dependency graph
+
+`build_dep_graph()` turns the library into a directed `igraph` where an edge
+`A -> B` means "A requires B". From it you can ask for cycles and for diamond
+(shared) dependencies -- the packages that multiple others depend on, which are
+exactly where version conflicts tend to arise.
+
+```{r graph}
+g <- build_dep_graph(lib)
+g
+
+bw_cycles(g)
+```
+
+The clean lockfile is acyclic, so `bw_cycles()` returns an empty list. The
+diamond dependencies, ordered by how many packages need them, point at the
+highest-risk shared packages:
+
+```{r diamonds}
+diamonds <- bw_diamonds(g)
+head(diamonds[, c("package", "n_dependents")])
+```
+
+## Detect conflicts
+
+`detect_conflicts()` returns a zero-row tibble when a library is healthy. The
+clean fixture is healthy:
+
+```{r conflicts-clean}
+detect_conflicts(bw_example("clean.lock"))
+```
+
+The `conflicted.lock` fixture is not. It surfaces four problems: a missing
+dependency, a hard version conflict, a version drift, and a cycle. The
+`required_by` column is a list column, so convert it to a string before printing
+as a `data.frame`:
+
+```{r conflicts-bad}
+conf <- detect_conflicts(bw_example("conflicted.lock"))
+conf$required_by <- vapply(conf$required_by, paste, character(1), collapse = ", ")
+as.data.frame(conf[, c("package", "type", "required_by", "satisfiable")])
+```
+
+Reading the rows: `zeta` is **missing** (needed by `alpha`); `rlang` is a
+**version_conflict** (one package wants `>= 1.1.0`, another `<= 0.4.12`); `cli`
+is a **version_drift** (a package wants `>= 99.0.0` but the pinned `cli` is
+`3.6.2`); and `ouroboros`/`boros` form a **cycle**.
+
+## Check system requirements
+
+`check_sysreqs()` maps packages to the OS libraries they need on a given
+platform. Passing `host_libraries` as a character vector makes presence
+deterministic: a library counts as present only if it appears in that vector.
+With an empty vector, nothing is installed, so every requirement is reported
+missing:
+
+```{r sysreqs}
+sys <- check_sysreqs(
+  bw_example("missing-sysreq.lock"),
+  platform = "linux",
+  host_libraries = character()
+)
+as.data.frame(sys[, c("package", "system_requirement", "status")])
+```
+
+Supplying, say, `host_libraries = c("libcurl", "openssl")` would flip the
+matching rows to `status = "ok"`.
+
+## Simulate the install
+
+`simulate_install()` produces a dependency-first install order and predicts an
+outcome for every package, propagating failures: anything that depends
+(transitively) on a failing package is marked `blocked`.
+
+```{r simulate}
+plan <- simulate_install(bw_example("conflicted.lock"))
+plan$feasible
+
+as.data.frame(plan$predicted_failures[, c("package", "predicted_status", "reason")])
+```
+
+`feasible` is `FALSE`, and `predicted_failures` lists each package that will
+fail or be blocked along with the reason -- `alpha` blocked by the missing
+`zeta`, `rlang` and its dependents tripped by the version conflict, and the
+`ouroboros`/`boros` cycle.
+
+## One-call diagnosis
+
+`diagnose()` runs the scan, graph, conflict, system-requirement and install
+steps together and bundles the results. Its `summary()` method returns a compact
+two-column health tibble:
+
+```{r diagnose}
+diag <- diagnose(
+  bw_example("conflicted.lock"),
+  platform = "linux",
+  host_libraries = character()
+)
+summary(diag)
+```
+
+The individual pieces are available as `diag$library`, `diag$graph`,
+`diag$conflicts`, `diag$sysreqs` and `diag$plan`.
+
+From a diagnosis (or any path/library) you can also produce a shareable
+artifact. `report(x, format = "quarto")` renders a self-contained HTML report and
+returns its path, and `run_dashboard(x)` launches an interactive Shiny dashboard.
+Both are omitted here because they render or open a browser; call them from an
+interactive session:
+
+```{r report, eval = FALSE}
+# Renders inst/report to a standalone HTML file and returns the path
+report(bw_example("conflicted.lock"), format = "quarto")
+
+# Launches the interactive Shiny dashboard
+run_dashboard(bw_example("conflicted.lock"))
+```
+
+## Gate an install with the pre-install hook
+
+`bw_preinstall_check()` is the hook to wire into a `renv`/`pak` workflow or CI
+step. It runs the full diagnosis against a lockfile and, with `strict = TRUE`,
+aborts when problems exist -- failing the build before a single package is
+fetched:
+
+```{r hook, eval = FALSE}
+# Returns a bw_diagnosis invisibly; aborts under strict = TRUE if problems exist
+bw_preinstall_check("renv.lock", strict = TRUE)
+```
+
+That is the whole loop: scan a lockfile, inspect the graph and conflicts, check
+system libraries, simulate the install, and gate on the result -- all before the
+real install runs.

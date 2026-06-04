@@ -1,0 +1,213 @@
+---
+title: "buildwright dependency-health report"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    theme: cosmo
+    code-fold: true
+params:
+  data_rds: null
+engine: knitr
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(buildwright)
+
+# Load the diagnosis written by report(); fall back to a bundled fixture so the
+# template renders offline under R CMD check with no network and only bundled
+# data.
+diag <- if (!is.null(params$data_rds) && file.exists(params$data_rds)) {
+  readRDS(params$data_rds)
+} else {
+  diagnose(bw_example("conflicted.lock"))
+}
+
+# Helper: collapse a list column into a comma-joined character vector so that
+# knitr::kable can render it (list columns cannot be printed directly).
+bw_join_list <- function(col, collapse = ", ") {
+  vapply(col, function(x) paste(x, collapse = collapse), character(1))
+}
+
+# Null-coalescing helper, defined locally so the template does not depend on
+# base R 4.4's `%||%` (the package supports R >= 4.2).
+`%||%` <- function(a, b) if (is.null(a)) b else a
+```
+
+# Executive summary
+
+```{r exec-summary}
+knitr::kable(summary(diag))
+```
+
+```{r exec-summary-text, results='asis'}
+m <- diag$meta
+cat(sprintf(
+  paste0(
+    "Diagnosed input `%s` (%s) containing **%d packages** for platform ",
+    "**%s** on R %s (Bioconductor %s).\n"
+  ),
+  m$input %||% "?", m$type %||% "?", m$n_packages %||% nrow(diag$library),
+  m$platform %||% "?", m$r_version %||% "?", m$bioc_version %||% "NA"
+))
+```
+
+# Library inventory
+
+```{r inventory-source}
+src <- as.data.frame(table(diag$library$source))
+names(src) <- c("source", "n")
+knitr::kable(src, caption = "Packages by source")
+```
+
+```{r inventory-table}
+inv <- diag$library[, c("package", "version", "source", "repository")]
+knitr::kable(inv, caption = "Package inventory")
+```
+
+# Dependency structure
+
+```{r dep-cycles, results='asis'}
+cycles <- bw_cycles(diag$graph)
+if (length(cycles) == 0L) {
+  cat("No dependency cycles detected; a valid install order exists.\n")
+} else {
+  cat(sprintf("**%d dependency cycle(s) detected:**\n\n", length(cycles)))
+  for (cyc in cycles) {
+    cat(sprintf("- %s\n", paste(cyc, collapse = " -> ")))
+  }
+}
+```
+
+```{r dep-diamonds}
+dia <- bw_diamonds(diag$graph)
+if (nrow(dia) == 0L) {
+  knitr::kable(
+    data.frame(message = "No shared (diamond) dependencies."),
+    col.names = ""
+  )
+} else {
+  dia_top <- utils::head(dia, 10L)
+  dia_top$dependents <- bw_join_list(dia_top$dependents)
+  knitr::kable(dia_top, caption = "Top shared (diamond) dependencies")
+}
+```
+
+```{r dep-plot, fig.width=8, fig.height=6, fig.cap="Dependency graph, coloured by source."}
+# igraph plotting is wrapped in tryCatch so a plotting hiccup never fails the
+# render. buildwright imports igraph, so no extra package is required.
+tryCatch(
+  {
+    g <- diag$graph
+    src_levels <- sort(unique(igraph::V(g)$source))
+    palette <- grDevices::hcl.colors(max(length(src_levels), 1L), "Dark 3")
+    vcol <- palette[match(igraph::V(g)$source, src_levels)]
+    op <- graphics::par(mar = c(0, 0, 0, 0))
+    on.exit(graphics::par(op), add = TRUE)
+    plot(
+      g,
+      vertex.color = vcol,
+      vertex.size = 12,
+      vertex.label.cex = 0.7,
+      vertex.label.color = "black",
+      edge.arrow.size = 0.4,
+      layout = igraph::layout_with_fr
+    )
+    graphics::legend(
+      "bottomleft",
+      legend = src_levels,
+      col = palette[seq_along(src_levels)],
+      pch = 19,
+      bty = "n",
+      cex = 0.8
+    )
+  },
+  error = function(e) {
+    plot.new()
+    graphics::text(0.5, 0.5, sprintf("Graph plot unavailable: %s", conditionMessage(e)))
+  }
+)
+```
+
+# Conflicts
+
+```{r conflicts, results='asis'}
+conf <- diag$conflicts
+if (nrow(conf) == 0L) {
+  cat("**No dependency conflicts detected.** The library is internally consistent.\n")
+}
+```
+
+```{r conflicts-table}
+conf <- diag$conflicts
+if (nrow(conf) > 0L) {
+  conf_tbl <- conf[, c(
+    "package", "type", "constraints", "installed_version", "satisfiable", "detail"
+  )]
+  knitr::kable(conf_tbl, caption = "Detected conflicts")
+}
+```
+
+# System requirements
+
+```{r sysreqs-summary, results='asis'}
+sr <- diag$sysreqs
+n_ok <- sum(sr$status == "ok", na.rm = TRUE)
+n_missing <- sum(sr$status == "missing", na.rm = TRUE)
+n_unknown <- sum(sr$status == "unknown", na.rm = TRUE)
+cat(sprintf(
+  "System requirements on platform **%s**: %d ok, %d missing, %d unknown.\n",
+  attr(sr, "bw_platform") %||% diag$meta$platform %||% "?",
+  n_ok, n_missing, n_unknown
+))
+```
+
+```{r sysreqs-table}
+sr <- diag$sysreqs
+if (nrow(sr) == 0L) {
+  knitr::kable(
+    data.frame(message = "No system requirements mapped for this library."),
+    col.names = ""
+  )
+} else {
+  knitr::kable(sr, caption = "System requirements")
+}
+```
+
+# Install simulation
+
+```{r install-summary, results='asis'}
+plan <- diag$plan
+cat(sprintf(
+  paste0(
+    "Install simulation is **%s**: %d ok, %d warning(s), %d predicted ",
+    "failure(s)/block(s).%s\n"
+  ),
+  if (isTRUE(plan$feasible)) "feasible" else "NOT feasible",
+  plan$n_ok, plan$n_warn, plan$n_fail,
+  if (isTRUE(plan$has_cycle)) " A dependency cycle is present." else ""
+))
+```
+
+```{r install-failures}
+plan <- diag$plan
+pf <- plan$predicted_failures
+if (nrow(pf) == 0L) {
+  knitr::kable(
+    data.frame(message = "No predicted failures."),
+    col.names = ""
+  )
+} else {
+  knitr::kable(pf, caption = "Predicted failures and blocks")
+}
+```
+
+```{r install-order, results='asis'}
+ord <- diag$plan$order
+cat("**Dependency-first install order (first 20):**\n\n")
+cat(paste(utils::head(ord, 20L), collapse = " -> "))
+if (length(ord) > 20L) {
+  cat(sprintf("\n\n... and %d more.\n", length(ord) - 20L))
+}
+```

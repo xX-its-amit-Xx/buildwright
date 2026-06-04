@@ -1,0 +1,79 @@
+url: https://ashenoy.github.io/buildwright/
+
+template:
+  bootstrap: 5
+  bootswatch: litera
+
+navbar:
+  structure:
+    left:  [intro, reference, articles, news]
+    right: [search, github]
+  components:
+    articles:
+      text: Articles
+      menu:
+        - text: Getting Started
+          href: articles/getting-started.html
+        - text: Cookbook
+          href: articles/cookbook.html
+    github:
+      icon: fab fa-github fa-lg
+      href: https://github.com/ashenoy/buildwright
+      aria-label: GitHub
+
+home:
+  links:
+    - text: Report a bug
+      href: https://github.com/ashenoy/buildwright/issues
+
+reference:
+  - title: Scan & graph
+    desc: >
+      Read an installed library or renv lockfile into a tidy inventory and build
+      an igraph dependency DAG with cycle and diamond helpers.
+    contents:
+      - scan_library
+      - build_dep_graph
+      - bw_cycles
+      - bw_diamonds
+      - bw_graph_data
+
+  - title: Diagnose & report
+    desc: >
+      Run the full diagnostic pipeline, render a static HTML report, or launch
+      the interactive Shiny dashboard.
+    contents:
+      - diagnose
+      - report
+      - run_dashboard
+
+  - title: Conflicts & system requirements
+    desc: >
+      Detect missing packages, version conflicts, and cycles; map packages to
+      system libraries and flag those that are absent on the host.
+    contents:
+      - detect_conflicts
+      - check_sysreqs
+      - bw_sysreq_library_db
+      - bw_sysreq_package_map
+
+  - title: Install simulation & hooks
+    desc: >
+      Predict install failures in dependency-first order and gate renv/pak
+      installs as a fail-fast pre-install hook.
+    contents:
+      - simulate_install
+      - bw_preinstall_check
+
+  - title: Helpers & data
+    desc: >
+      Access bundled fixture lockfiles for examples and tests, and retrieve
+      the current dashboard diagnosis object.
+    contents:
+      - bw_example
+      - bw_dashboard_data
+
+news:
+  releases:
+    - text: "buildwright 0.1.0"
+      href: news/index.html

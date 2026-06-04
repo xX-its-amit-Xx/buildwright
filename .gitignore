@@ -1,0 +1,33 @@
+# R / RStudio
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# pkgdown site / vignette build output
+docs/
+inst/doc/
+/doc/
+/Meta/
+
+# Rendered report artifacts produced by report()
+cookbook/output/
+*.html
+!inst/report/*.html
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# renv (cookbook examples may create throwaway libraries)
+cookbook/**/renv/library/
+cookbook/**/renv/staging/
+cookbook/**/.Rproj.user/
+
+# Generated cookbook inputs/outputs (recipes regenerate these)
+cookbook/data/*.lock
+
+# Local developer scratch + scratch render artifacts (not part of the package)
+dev/

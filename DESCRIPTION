@@ -1,0 +1,53 @@
+Package: buildwright
+Title: Dependency-Health and Build-Failure Diagnostics for Managed R
+    Environments
+Version: 0.1.0
+Authors@R:
+    person("Amit", "Shenoy", , "shenoy.am@husky.neu.edu", role = c("aut", "cre"))
+Description: Diagnoses dependency health and predicts build and install
+    failures for large, managed R package distributions of the kind
+    maintained on Posit Connect, Posit Workbench, and Bioconductor. It
+    scans installed libraries and 'renv' lockfiles, builds a dependency
+    graph, detects version conflicts and cycles, maps packages to their
+    system requirements, and simulates installation order to surface
+    failures before an install is attempted. Results can be rendered as a
+    static report or explored in an interactive dashboard, and the checks
+    can be wired into 'renv' and 'pak' workflows as a pre-install hook.
+License: GPL-3
+URL: https://github.com/ashenoy/buildwright,
+    https://ashenoy.github.io/buildwright/
+BugReports: https://github.com/ashenoy/buildwright/issues
+Depends:
+    R (>= 4.2)
+Imports:
+    cli,
+    desc,
+    igraph,
+    jsonlite,
+    rlang,
+    tibble,
+    tools,
+    utils
+Suggests:
+    BiocManager,
+    bslib,
+    covr,
+    DT,
+    knitr,
+    pak,
+    pkgcache,
+    quarto,
+    renv,
+    rmarkdown,
+    shiny,
+    testthat (>= 3.0.0),
+    visNetwork,
+    withr
+VignetteBuilder:
+    knitr
+Config/testthat/edition: 3
+Encoding: UTF-8
+Language: en-US
+LazyData: false
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.0.0
