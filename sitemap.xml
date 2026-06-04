@@ -1,0 +1,27 @@
+<urlset xmlns = 'http://www.sitemaps.org/schemas/sitemap/0.9'>
+<url><loc>https://ashenoy.github.io/buildwright/404.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/LICENSE.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/articles/cookbook.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/articles/getting-started.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/articles/index.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/authors.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/index.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/news/index.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/build_dep_graph.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/buildwright-package.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/bw_cycles.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/bw_dashboard_data.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/bw_diamonds.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/bw_graph_data.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/bw_preinstall_check.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/bw_sysreq_library_db.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/check_sysreqs.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/detect_conflicts.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/diagnose.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/index.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/report.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/run_dashboard.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/scan_library.html</loc></url>
+<url><loc>https://ashenoy.github.io/buildwright/reference/simulate_install.html</loc></url>
+</urlset>
+

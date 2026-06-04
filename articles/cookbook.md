@@ -1,0 +1,472 @@
+# buildwright cookbook
+
+This cookbook collects end-to-end recipes for the kind of problem
+buildwright exists to catch: a managed R distribution (Posit Connect /
+Workbench, Bioconductor, an internal package repository) that *looks*
+fine in a lockfile but will not actually install. Every recipe here runs
+offline against bundled or locally-constructed data, so you can
+reproduce each one without a network connection. The fuller,
+network-enabled versions live in the package’s `cookbook/` folder (run
+with `Rscript cookbook/01-...R` from the package root).
+
+A note on list columns: `requirements`, `required_by`, and `dependents`
+are list columns, which
+[`knitr::kable()`](https://rdrr.io/pkg/knitr/man/kable.html) and `DT`
+cannot print directly. Where a recipe shows such a column in a table, it
+is flattened to a comma-joined string first with
+`vapply(x, paste, character(1), collapse = ", ")`.
+
+## Recipe 1: Diagnosing a deliberately-broken Bioconductor install
+
+A common Bioconductor failure mode: a lockfile pins a Bioconductor
+package but omits one of its Bioconductor dependencies (for example
+because the dependency was only present transitively in the environment
+the lock was captured from). The install then dies part-way through with
+an opaque “package ‘X’ is not available” error. buildwright surfaces
+this *before* the install runs.
+
+We build a tiny broken `renv.lock` inline, write it to a temp file, and
+scan it. `S4Vectors` requires `IRanges`, but `IRanges` is absent from
+the lockfile. We also include `RCurl`, which carries a known system
+requirement (libcurl), so the same diagnosis demonstrates a
+system-library warning.
+
+``` r
+
+broken_lock <- '{
+  "R": { "Version": "4.3.2" },
+  "Bioconductor": { "Version": "3.18" },
+  "Packages": {
+    "BiocGenerics": {
+      "Package": "BiocGenerics",
+      "Version": "0.48.1",
+      "Source": "Bioconductor",
+      "Repository": "Bioconductor 3.18",
+      "Requirements": []
+    },
+    "S4Vectors": {
+      "Package": "S4Vectors",
+      "Version": "0.40.2",
+      "Source": "Bioconductor",
+      "Repository": "Bioconductor 3.18",
+      "Requirements": ["BiocGenerics", "IRanges"]
+    },
+    "RCurl": {
+      "Package": "RCurl",
+      "Version": "1.98-1.14",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": ["bitops"]
+    },
+    "bitops": {
+      "Package": "bitops",
+      "Version": "1.0-7",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": []
+    }
+  }
+}'
+
+lock_path <- tempfile("broken-bioc-", fileext = ".lock")
+writeLines(broken_lock, lock_path)
+```
+
+Scan it and confirm the sources are read correctly (two Bioconductor,
+two CRAN):
+
+``` r
+
+lib <- scan_library(lock_path)
+lib[, c("package", "version", "source")]
+#> 
+#> ── buildwright library scan ────────────────────────────────────────────────────
+#> 4 packages from lockfile /tmp/RtmppHuZ7a/broken-bioc-1e797d4eb93.lock
+#> R version: "4.3.2"
+#> Bioconductor: "3.18"
+#> Sources: Bioconductor (2), CRAN (2)
+#> 
+#> # A tibble: 4 × 3
+#>   package      version   source      
+#>   <chr>        <chr>     <chr>       
+#> 1 BiocGenerics 0.48.1    Bioconductor
+#> 2 bitops       1.0-7     CRAN        
+#> 3 RCurl        1.98-1.14 CRAN        
+#> 4 S4Vectors    0.40.2    Bioconductor
+table(lib$source)
+#> 
+#> Bioconductor         CRAN 
+#>            2            2
+```
+
+[`detect_conflicts()`](https://ashenoy.github.io/buildwright/reference/detect_conflicts.md)
+flags the missing Bioconductor dependency. `IRanges` is required by
+`S4Vectors` but is absent from the scanned set, so it is reported as
+`missing` and unsatisfiable:
+
+``` r
+
+conf <- detect_conflicts(lib)
+conf[, c("package", "type", "satisfiable", "detail")]
+#> 
+#> ── buildwright conflicts ───────────────────────────────────────────────────────
+#> ! 1 issue: missing (1)
+#> • missing -- 'IRanges' is required by S4Vectors but is not present in the
+#> scanned set.
+```
+
+[`simulate_install()`](https://ashenoy.github.io/buildwright/reference/simulate_install.md)
+then predicts the consequence: `IRanges` has no install step (it is not
+in the set), and everything that depends on it transitively is
+`blocked`, so the plan is not feasible:
+
+``` r
+
+plan <- simulate_install(lock_path, platform = "linux", host_libraries = character())
+plan$feasible
+#> [1] FALSE
+plan$predicted_failures[, c("package", "predicted_status", "reason")]
+#> # A tibble: 1 × 3
+#>   package   predicted_status reason            
+#>   <chr>     <chr>            <chr>             
+#> 1 S4Vectors blocked          blocked by IRanges
+```
+
+Finally,
+[`check_sysreqs()`](https://ashenoy.github.io/buildwright/reference/check_sysreqs.md)
+(on a host with no system libraries) catches the libcurl requirement
+that `RCurl` pulls in:
+
+``` r
+
+sr <- check_sysreqs(lib, platform = "linux", host_libraries = character())
+sr[, c("package", "system_requirement", "status", "install_hint")]
+#> 
+#> ── buildwright system requirements (linux) ─────────────────────────────────────
+#> 1 requirement: 0 ok, 1 missing, 0 unknown
+#> 
+#> ── Likely-missing libraries ──
+#> 
+#> • cURL (for RCurl): apt-get install -y libcurl4-openssl-dev (or dnf install
+#> libcurl-devel)
+```
+
+A single
+[`diagnose()`](https://ashenoy.github.io/buildwright/reference/diagnose.md)
+call bundles all of the above; its print method gives the at-a-glance
+health summary you would gate an install on:
+
+``` r
+
+diag <- diagnose(lock_path, platform = "linux", host_libraries = character())
+diag
+#> 
+#> ── buildwright diagnosis ───────────────────────────────────────────────────────
+#> Input: /tmp/RtmppHuZ7a/broken-bioc-1e797d4eb93.lock (lockfile)
+#> 4 packages, platform "linux"
+#> 
+#> ! Conflicts: 1 (missing)
+#> ! System requirements: 1 likely-missing library
+#> ✖ Install simulation: 1 package predicted to fail/block
+#> 
+#> Inspect $library, $graph, $conflicts, $sysreqs, $plan; or report(x).
+summary(diag)
+#> # A tibble: 5 × 2
+#>   metric             value
+#>   <chr>              <chr>
+#> 1 packages           4    
+#> 2 conflicts          1    
+#> 3 missing_sysreqs    1    
+#> 4 predicted_failures 1    
+#> 5 feasible           FALSE
+```
+
+## Recipe 2: Auditing a real `renv.lock` from a public R project
+
+buildwright ships a real lockfile taken from the `rstudio/renv` test
+resources (`tests/testthat/resources/bioconductor.lock`). It is a
+genuine, if small, Bioconductor environment and contains two real
+reproducibility smells worth catching in review.
+
+``` r
+
+real_lock <- system.file("extdata", "public-project.lock", package = "buildwright")
+rlib <- scan_library(real_lock)
+rlib[, c("package", "version", "source", "repository")]
+#> 
+#> ── buildwright library scan ────────────────────────────────────────────────────
+#> 3 packages from lockfile
+#> /home/runner/work/_temp/Library/buildwright/extdata/public-project.lock
+#> R version: "4.1.2"
+#> Bioconductor: "3.13"
+#> Sources: Bioconductor (2), local (1)
+#> 
+#> # A tibble: 3 × 4
+#>   package      version   source       repository                                
+#>   <chr>        <chr>     <chr>        <chr>                                     
+#> 1 BiocGenerics 0.38.0    Bioconductor https://git.bioconductor.org/packages/Bio…
+#> 2 limma        3.50.0    Bioconductor https://git.bioconductor.org/packages/lim…
+#> 3 renv         0.14.0-69 local        ~/r/pkg/renv
+```
+
+The source breakdown shows the first finding immediately: alongside two
+Bioconductor packages there is a package installed from a **Local**
+source.
+
+``` r
+
+table(rlib$source)
+#> 
+#> Bioconductor        local 
+#>            2            1
+```
+
+**Finding 1 – a Local-source package.** `renv` itself is recorded with
+`Source: "Local"` pointing at a path on the lock author’s machine
+(`~/r/pkg/renv`). A Local source is not reproducible on any other
+machine: there is no repository or commit to restore from. In a review
+you would flag this and ask for a CRAN or pinned-GitHub version instead.
+
+``` r
+
+rlib[rlib$source == "local", c("package", "version", "repository")]
+#> 
+#> ── buildwright library scan ────────────────────────────────────────────────────
+#> 1 packages from lockfile
+#> /home/runner/work/_temp/Library/buildwright/extdata/public-project.lock
+#> R version: "4.1.2"
+#> Bioconductor: "3.13"
+#> 
+#> # A tibble: 1 × 3
+#>   package version   repository  
+#>   <chr>   <chr>     <chr>       
+#> 1 renv    0.14.0-69 ~/r/pkg/renv
+```
+
+**Finding 2 – a Bioconductor release mismatch.** Both Bioconductor
+packages report the same `source`, but the lockfile pins them to
+*different Bioconductor release branches*. The `git_branch` fields are
+not surfaced in the scan tibble, so we read the raw lock JSON with
+`jsonlite` to expose them:
+
+``` r
+
+raw <- jsonlite::fromJSON(real_lock, simplifyVector = FALSE)
+bioc <- Filter(function(p) identical(p$Source, "Bioconductor"), raw$Packages)
+branch_of <- function(p) if (is.null(p$git_branch)) NA_character_ else p$git_branch
+data.frame(
+  package = vapply(bioc, function(p) p$Package, character(1)),
+  version = vapply(bioc, function(p) p$Version, character(1)),
+  git_branch = vapply(bioc, branch_of, character(1)),
+  row.names = NULL
+)
+#>        package version   git_branch
+#> 1 BiocGenerics  0.38.0 RELEASE_3_13
+#> 2        limma  3.50.0 RELEASE_3_14
+```
+
+`BiocGenerics` is pinned to `RELEASE_3_13` while `limma` is pinned to
+`RELEASE_3_14` – two different Bioconductor releases in one environment.
+The lockfile’s declared `Bioconductor$Version` is `3.13`, so the `limma`
+pin is inconsistent with the environment it claims to describe. That is
+exactly the sort of drift that makes a Bioconductor restore fail or
+silently mix releases.
+
+The structural diagnosis itself is clean (these three packages have no
+missing dependencies or cycles), which is the point: a lockfile can pass
+the structural checks and still carry reproducibility problems a human
+should see.
+
+``` r
+
+diagnose(real_lock)
+#> 
+#> ── buildwright diagnosis ───────────────────────────────────────────────────────
+#> Input: /home/runner/work/_temp/Library/buildwright/extdata/public-project.lock
+#> (lockfile)
+#> 3 packages, platform "linux"
+#> 
+#> ✔ Conflicts: none
+#> ✔ System requirements: no missing libraries detected
+#> ✔ Install simulation: feasible (0 warnings)
+#> 
+#> Inspect $library, $graph, $conflicts, $sysreqs, $plan; or report(x).
+```
+
+If you wanted to fetch this lock live from GitHub instead of using the
+bundled copy, you would do the following (not run here, since the
+vignette must build offline):
+
+``` r
+
+url <- paste0(
+  "https://raw.githubusercontent.com/rstudio/renv/main/",
+  "tests/testthat/resources/bioconductor.lock"
+)
+dest <- tempfile("public-", fileext = ".lock")
+download.file(url, dest, quiet = TRUE)
+diagnose(dest)
+```
+
+## Recipe 3: Catching a version-drift conflict between two CRAN packages
+
+Lockfiles often omit version constraints, but installed libraries (and
+many internal package sets) carry them in each `DESCRIPTION`. When two
+packages demand incompatible version ranges of a shared dependency, no
+single version can satisfy both and the install is doomed. buildwright
+detects this from the `DESCRIPTION` files directly.
+
+We construct a tiny three-package library in a temp directory: `pkgA`
+imports `shared (>= 2.0)`, `pkgB` imports `shared (<= 1.0)`, and
+`shared` is present at `1.5`. The two ranges do not intersect.
+
+``` r
+
+lib_dir <- file.path(tempdir(), "drift-lib")
+dir.create(lib_dir, showWarnings = FALSE)
+
+write_desc <- function(name, version, imports = NULL) {
+  pkg_dir <- file.path(lib_dir, name)
+  dir.create(pkg_dir, showWarnings = FALSE)
+  lines <- c(
+    paste0("Package: ", name),
+    paste0("Version: ", version),
+    "Title: Fixture",
+    "Description: Fixture package for the buildwright cookbook.",
+    "License: GPL-3"
+  )
+  if (!is.null(imports)) lines <- c(lines, paste0("Imports: ", imports))
+  writeLines(lines, file.path(pkg_dir, "DESCRIPTION"))
+}
+
+write_desc("pkgA", "1.0.0", imports = "shared (>= 2.0)")
+write_desc("pkgB", "1.0.0", imports = "shared (<= 1.0)")
+write_desc("shared", "1.5.0")
+```
+
+Scan the directory as an installed library and detect conflicts. The
+shared dependency is flagged as a `version_conflict`: the intersection
+of `>= 2.0` and `<= 1.0` is empty.
+
+``` r
+
+drift_lib <- scan_library(lib_dir)
+drift_lib[, c("package", "version", "source", "requirements")]
+#> 
+#> ── buildwright library scan ────────────────────────────────────────────────────
+#> 3 packages from library /tmp/RtmppHuZ7a/drift-lib
+#> R version: "4.6.0"
+#> Sources: local (3)
+#> 
+#> # A tibble: 3 × 4
+#>   package version source requirements
+#>   <chr>   <chr>   <chr>  <list>      
+#> 1 pkgA    1.0.0   local  <chr [1]>   
+#> 2 pkgB    1.0.0   local  <chr [1]>   
+#> 3 shared  1.5.0   local  <chr [0]>
+
+dconf <- detect_conflicts(drift_lib)
+dconf[, c("package", "type", "constraints", "installed_version", "satisfiable")]
+#> 
+#> ── buildwright conflicts ───────────────────────────────────────────────────────
+#> ! 1 issue: version_conflict (1)
+#> Warning: Unknown or uninitialised column: `detail`.
+#> • version_conflict --
+```
+
+The `constraints` column records both demands so the reviewer can see
+exactly which packages disagree:
+
+``` r
+
+dconf$detail
+#> [1] "No single version of 'shared' satisfies all of: >= 2.0 (pkgA); <= 1.0 (pkgB)."
+```
+
+[`simulate_install()`](https://ashenoy.github.io/buildwright/reference/simulate_install.md)
+marks `shared` itself as failing (unsatisfiable constraints) and
+`pkgA`/`pkgB` as blocked behind it:
+
+``` r
+
+dplan <- simulate_install(drift_lib)
+dplan$feasible
+#> [1] FALSE
+dplan$predicted_failures[, c("package", "predicted_status", "reason")]
+#> # A tibble: 3 × 3
+#>   package predicted_status reason                           
+#>   <chr>   <chr>            <chr>                            
+#> 1 shared  fail             unsatisfiable version constraints
+#> 2 pkgB    blocked          blocked by shared                
+#> 3 pkgA    blocked          blocked by shared
+```
+
+## Recipe 4: Wiring buildwright into renv / pak
+
+The point of all of the above is to fail *fast and early*, before an
+install spends ten minutes compiling and then dies.
+[`bw_preinstall_check()`](https://ashenoy.github.io/buildwright/reference/bw_preinstall_check.md)
+is the gate: run it in front of
+[`renv::restore()`](https://rstudio.github.io/renv/reference/restore.html)
+or a `pak` install and, with `strict = TRUE`, it aborts when problems
+are predicted.
+
+On a healthy lockfile the strict check passes silently and the install
+proceeds:
+
+``` r
+
+bw_preinstall_check(bw_example("clean.lock"), strict = TRUE, quiet = TRUE)
+```
+
+On a broken lockfile, `strict = TRUE` raises an error – in a script or
+CI job that aborts before any package is built. Here we catch the error
+to show its message:
+
+``` r
+
+tryCatch(
+  bw_preinstall_check(bw_example("conflicted.lock"), strict = TRUE, quiet = TRUE),
+  error = function(e) cat("gate tripped:", conditionMessage(e), "\n")
+)
+#> gate tripped: buildwright pre-install check failed.
+#> ✖ 4 conflicts, 6 predicted install failures, 0 missing system libraries.
+#> ℹ Run `diagnose()` or `report()` for details, or set `strict = FALSE` to warn
+#>   only.
+```
+
+In a real restore script you would place the gate immediately before the
+install call (shown here with `eval = FALSE` because it touches the
+network and your library):
+
+``` r
+
+# restore.R -- run before bringing an environment up to its lockfile.
+buildwright::bw_preinstall_check("renv.lock", strict = TRUE)
+renv::restore()
+```
+
+The same gate works in front of `pak`. On a host where you know which
+system libraries are installed, pass them so the system-requirement
+check is deterministic:
+
+``` r
+
+buildwright::bw_preinstall_check(
+  "renv.lock",
+  strict = TRUE,
+  host_libraries = c("libcurl", "openssl")
+)
+pak::pkg_install("local::.")
+```
+
+And as a CI step, a one-line `Rscript` invocation fails the job
+(non-zero exit) when the lockfile is unhealthy:
+
+``` sh
+Rscript -e 'buildwright::bw_preinstall_check("renv.lock", strict = TRUE)'
+```
+
+See the package’s `cookbook/` folder for the full, network-enabled
+versions of recipes 1-2 (rendering HTML reports and downloading a live
+lockfile) and a ready-to-drop-in `cookbook/hooks/preinstall-hook.R`.
